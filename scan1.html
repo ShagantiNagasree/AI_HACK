@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Barcode Scanner & Image Capture</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 600px;
+            margin: 50px auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 { color: #333; }
+        video { width: 100%; height: auto; border-radius: 10px; }
+        button {
+            padding: 10px;
+            margin: 10px;
+            font-size: 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: gray; cursor: not-allowed; }
+        #barcode-result { font-size: 18px; margin-top: 20px; font-weight: bold; color: #d9534f; }
+        .captured img { width: 100%; max-width: 400px; border-radius: 10px; box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1); }
+        .video-container {
+            position: relative;
+            display: inline-block;
+        }
+        #barcode-scanner {
+            width: 100%;
+            height: auto;
+            border-radius: 10px;
+        }
+        #barcode-guide {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 80%;
+            height: 60px;
+            transform: translate(-50%, -50%);
+            border: 3px dashed red;
+            border-radius: 5px;
+            pointer-events: none;
+        }
+        
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Live Barcode Scanner & Image Capture</h1>
+        <button id="start-scanner">Start Scanning</button>
+        <button id="capture-image" disabled>Capture Image</button>
+        <button id="reset" disabled>Reset</button>
+        <div>
+            <div class="video-container">
+                <video id="barcode-scanner" autoplay></video>
+                <div id="barcode-guide"></div> <!-- Guide Box -->
+            </div>
+            
+            <canvas id="snapshot" style="display: none;"></canvas>
+        </div>
+        <p id="barcode-result">Scanned Barcode: <span id="barcode-value">None</span></p>
+        <div class="captured">
+            <h2>Captured Image</h2>
+            <img id="captured-image" src="" alt="Captured Image">
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+    <script>
+        let lastScannedCode = null;  
+        let videoStream = null;
+        let scannerActive = false;
+
+        function startBarcodeScanner() {
+            scannerActive = true;
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                .then(function (stream) {
+                    videoStream = stream;
+                    let video = document.getElementById("barcode-scanner");
+                    video.srcObject = stream;
+                    document.getElementById("capture-image").disabled = false;
+                    document.getElementById("reset").disabled = false;
+                })
+                .catch(function (err) {
+                    console.error("Error accessing camera:", err);
+                });
+
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: document.querySelector("#barcode-scanner"),
+                    constraints: { facingMode: "environment" }
+                },
+                decoder: {
+                    readers: [
+                        "ean_reader", "ean_8_reader", "code_128_reader",
+                        "upc_reader", "upc_e_reader", "code_39_reader",
+                        "code_93_reader", "i2of5_reader"
+                    ]
+                },
+                locate: true,
+                multiple: false
+            }, function (err) {
+                if (err) {
+                    console.error("QuaggaJS initialization failed:", err);
+                    return;
+                }
+                Quagga.start();
+            });
+
+            Quagga.onDetected(function (result) {
+                if (!scannerActive) return;
+                let barcode = result.codeResult.code;
+                if (barcode !== lastScannedCode && isValidBarcode(barcode)) {
+                    lastScannedCode = barcode;
+                    playBeepSound();
+                    displayBarcode(barcode);
+                }
+            });
+        }
+
+        function isValidBarcode(barcode) {
+            return barcode && barcode.length >= 8; // Adjust based on required format
+        }
+
+        function playBeepSound() {
+            let beep = new Audio("https://www.soundjay.com/button/beep-07.wav");
+            beep.play();
+        }
+
+        function displayBarcode(barcode) {
+            document.getElementById("barcode-value").innerText = barcode;
+        }
+
+        function captureImage() {
+            scannerActive = false;  // Stop barcode scanning
+            Quagga.stop();  // Stops QuaggaJS processing
+            
+            let video = document.getElementById("barcode-scanner");
+            let canvas = document.getElementById("snapshot");
+            let context = canvas.getContext("2d");
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            document.getElementById("captured-image").src = canvas.toDataURL("image/png");
+
+            // Stop camera stream
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+            }
+
+            document.getElementById("capture-image").disabled = true;
+            document.getElementById("start-scanner").disabled = true;
+        }
+
+        function resetScanner() {
+            lastScannedCode = null;
+            document.getElementById("barcode-value").innerText = "None";
+            document.getElementById("captured-image").src = "";
+            document.getElementById("start-scanner").disabled = false;
+            document.getElementById("capture-image").disabled = true;
+            document.getElementById("reset").disabled = true;
+            startBarcodeScanner(); // Restart scanner
+        }
+
+        document.getElementById("start-scanner").addEventListener("click", startBarcodeScanner);
+        document.getElementById("capture-image").addEventListener("click", captureImage);
+        document.getElementById("reset").addEventListener("click", resetScanner);
+    </script>
+</body>
+</html>
